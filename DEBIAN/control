@@ -1,4 +1,4 @@
-Package: time_warden
+Package: time-warden
 Version: 0.0.1
 Section: misc
 Priority: optional
