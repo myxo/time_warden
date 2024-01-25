@@ -30,9 +30,9 @@ jobs:
       run: |
         mkdir -p PKG_SOURCE
         cp -Rf REPO/usr REPO/etc REPO/DEBIAN PKG_SOURCE
-        dpkg-deb --build PKG_SOURCE "time_warden${{  github.ref_name }}.deb"
+        dpkg-deb --build PKG_SOURCE time_warden_${{  github.ref_name }}.deb
 
     - name: Release the Package
       uses: softprops/action-gh-release@v1
       with:
-        files: "time_warden${{  github.ref_name }}.deb"
+        files: time_warden_${{  github.ref_name }}.deb
