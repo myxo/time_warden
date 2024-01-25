@@ -32,7 +32,13 @@ jobs:
         cp -Rf REPO/usr REPO/etc REPO/DEBIAN PKG_SOURCE
         dpkg-deb --build PKG_SOURCE time_warden_${{  github.ref_name }}.deb
 
-    - name: Release the Package
-      uses: softprops/action-gh-release@v1
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        files: time_warden_${{  github.ref_name }}.deb
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: true
+        prerelease: false
