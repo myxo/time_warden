@@ -1,0 +1,37 @@
+name: deb package
+
+# Only run this workflow when the push is an annotated tag starting v
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # This is used to identify the output in other jobs
+  Create_Package:
+    name: Create deb package
+    runs-on: ubuntu-latest
+    steps:
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        path: "REPO"
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Build
+      run: go build -v -o usr/bin/time_warden ./...
+
+    - name: Build package
+      run: |
+        mkdir -p PKG_SOURCE
+        cp -Rf REPO/usr REPO/etc REPO/DEBIAN PKG_SOURCE
+        dpkg-deb --build PKG_SOURCE "time_warden${{  github.ref_name }}.deb"
+
+    - name: Release the Package
+      uses: softprops/action-gh-release@v1
+      with:
+        files: "time_warden${{  github.ref_name }}.deb"

@@ -1,0 +1,7 @@
+Package: time_warden
+Version: 0.0.1
+Section: misc
+Priority: optional
+Architecture: all
+Maintainer: Nikolay Klimov <klimov.ns@mail.ru>
+Description: Mou Nidoto Modorenai Anokoroni
