@@ -9,3 +9,4 @@ This <s>app</s> script is not intended to be read or (god forbid) run by anyone 
 - [ ] graceful restart
 - [ ] add good summary command
 - [ ] change version in control file (in github action)
+- [ ] ids white list
