@@ -21,16 +21,27 @@ jobs:
       with:
         go-version: '1.21'
 
-    - name: Build
+    - name: Build amd64
       run: |
         cd REPO
-        go build -v -o usr/bin/time_warden ./...
+        go build -v -o amd64/usr/bin/time_warden ./...
 
-    - name: Build package
+    - name: Build arm64
       run: |
-        mkdir -p PKG_SOURCE
-        cp -Rf REPO/usr REPO/etc REPO/DEBIAN PKG_SOURCE
-        dpkg-deb --build PKG_SOURCE time_warden_${{  github.ref_name }}.deb
+        cd REPO
+        GOOS=linux GOARCH=arm go build -v -o arm64/usr/bin/time_warden ./...
+
+    - name: Build package AMD
+      run: |
+        mkdir -p PKG_SOURCE_AMD
+        cp -Rf REPO/amd64/usr REPO/etc REPO/DEBIAN PKG_SOURCE_AMD
+        dpkg-deb --build PKG_SOURCE_AMD time_warden_amd_${{  github.ref_name }}.deb
+
+    - name: Build package ARM
+      run: |
+        mkdir -p PKG_SOURCE_ARM
+        cp -Rf REPO/arm64/usr REPO/etc REPO/DEBIAN PKG_SOURCE_ARM
+        dpkg-deb --build PKG_SOURCE_ARM time_warden_arm_${{  github.ref_name }}.deb
 
     - name: Create Release
       id: create_release
@@ -43,13 +54,24 @@ jobs:
         draft: false
         prerelease: false
 
-    - name: Upload Release Asset
+    - name: Upload AMD package
       id: upload-release-asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-        asset_path: ./time_warden_${{  github.ref_name }}.deb
-        asset_name: time_warden_${{  github.ref_name }}.deb
+        asset_path: ./time_warden_amd_${{  github.ref_name }}.deb
+        asset_name: time_warden_amd_${{  github.ref_name }}.deb
+        asset_content_type: application/octet-stream
+
+    - name: Upload ARM package
+      id: upload-release-asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+        asset_path: ./time_warden_arm_${{  github.ref_name }}.deb
+        asset_name: time_warden_arm_${{  github.ref_name }}.deb
         asset_content_type: application/octet-stream

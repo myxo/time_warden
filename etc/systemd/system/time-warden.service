@@ -1,0 +1,12 @@
+[Unit]
+Description=Time Warden - telegram api for timew
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/time_warden
+Type=simple
+Restart=always
+
+[Install]
+WantedBy=default.target
+RequiredBy=network.target
