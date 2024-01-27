@@ -3,7 +3,7 @@ Description=Time Warden - telegram api for timew
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/time_warden
+ExecStart=/usr/bin/time_warden -token-file=/etc/time_warden_token -categories=/etc/time_warden_category.yml
 Type=simple
 Restart=always
 

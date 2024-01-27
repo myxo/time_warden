@@ -121,22 +121,26 @@ func main() {
 	flag.Parse()
 	tokenRaw, err := os.ReadFile(*tokenFile)
 	if err != nil {
-		log.Panic(err)
+		slog.Error("cannot read token file", "error", err)
+		os.Exit(1)
 	}
 	token := strings.TrimSpace(string(tokenRaw))
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
-		log.Panic(err)
+		slog.Error("cannot connect to telegram api", "error", err)
+		os.Exit(1)
 	}
 
 	configRaw, err := os.ReadFile(*categoryFile)
 	if err != nil {
-		log.Panic(err)
+		slog.Error("cannot open category file", "error", err)
+		os.Exit(1)
 	}
 	var cat categories
 	err = yaml.Unmarshal(configRaw, &cat)
 	if err != nil {
-		log.Panic(err)
+		slog.Error("cannot parse category file", "error", err)
+		os.Exit(1)
 	}
 
 	// bot.Debug = true
