@@ -6,7 +6,7 @@ This <s>app</s> script is not intended to be read or (god forbid) run by anyone 
 # TODO
 - [ ] research why binary is so bloated
 - [ ] timer asking if we abandon task
-- [ ] graceful restart
 - [ ] add good summary command
 - [ ] change version in control file (in github action)
 - [ ] ids white list
+- [ ] open keyboard all time?

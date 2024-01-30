@@ -7,7 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path"
 	"strings"
+	"syscall"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"gopkg.in/yaml.v3"
@@ -115,6 +118,7 @@ func checkActiveTracker() bool {
 }
 
 func main() {
+	initLog()
 	tokenFile := flag.String("token-file", "token", "telegram api token")
 	categoryFile := flag.String("categories", "category.yml", "file with list of categories")
 	flag.Parse()
@@ -152,87 +156,110 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 
 	mainKeyboard := createKeyboard(cat)
-	closeKeyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("close", "close")))
+	closeKeyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("stop", "stop")))
 
-	for update := range updates {
-		if update.Message != nil {
-			slog.Info("Message", "username", update.Message.From.UserName, "text", update.Message.Text)
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 
-			switch update.Message.Text {
-			case "/open":
-				msg.ReplyMarkup = mainKeyboard
-			case "/stop":
-				tCmd := exec.Command("timew", "stop")
-				if err != nil {
-					msg.Text = fmt.Sprintf("error: %s", err.Error())
-				} else {
-					output, err := tCmd.Output()
+Loop:
+	for {
+		select {
+		case <-sigc:
+			break Loop
+		case update := <-updates:
+			if update.Message != nil {
+				slog.Info("Message", "username", update.Message.From.UserName, "text", update.Message.Text)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+
+				switch update.Message.Text {
+				case "/open":
+					msg.ReplyMarkup = mainKeyboard
+				case "/stop":
+					tCmd := exec.Command("timew", "stop")
 					if err != nil {
-						slog.Error("cannot run timew", "msg", err)
+						msg.Text = fmt.Sprintf("error: %s", err.Error())
+					} else {
+						output, err := tCmd.Output()
+						if err != nil {
+							slog.Error("cannot run timew", "msg", err)
+						}
+						msg.Text = string(output)
 					}
-					msg.Text = string(output)
+				case "/status":
+					// TODO
 				}
-			case "/status":
-				// TODO
-			}
-			if _, err := bot.Send(msg); err != nil {
-				slog.Error("cannot send", "msg", err)
-			}
-		} else if update.CallbackQuery != nil {
-			slog.Info("Update with callbackQuery", "query_data", update.CallbackQuery.Data)
-			callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-			if _, err := bot.Request(callback); err != nil {
-				panic(err)
-			}
-			deleteKeyboard(bot, &update)
-
-			if update.CallbackQuery.Data == "close" {
-				tCmd := exec.Command("timew", "stop")
-				if err != nil {
-					sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
-					continue
-				}
-				output, err := tCmd.Output()
-				if err != nil {
+				if _, err := bot.Send(msg); err != nil {
 					slog.Error("cannot send", "msg", err)
 				}
-				sendByCallback(bot, &update, string(output), nil)
-				continue
-			}
-
-			var data buttonData
-			err := json.Unmarshal([]byte(update.CallbackQuery.Data), &data)
-			if err != nil {
-				sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
-				continue
-			}
-			if len(data.Subcats) != 0 {
-				sendByCallback(bot, &update, "choose subcat", createKeyboardFroSubcat(data.Cat, data.Subcats))
-			} else {
-				if data.Cat == "" {
-					slog.Error("cat is empty")
+			} else if update.CallbackQuery != nil { // keyboard callback
+				slog.Info("Update with callbackQuery", "query_data", update.CallbackQuery.Data)
+				callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
+				if _, err := bot.Request(callback); err != nil {
+					panic(err)
 				}
-				var tCmd *exec.Cmd
-				if data.Subcat != "" {
-					tCmd = exec.Command("timew", "start", data.Cat, data.Subcat)
+				deleteKeyboard(bot, &update)
+
+				if update.CallbackQuery.Data == "stop" {
+					tCmd := exec.Command("timew", "stop")
+					if err != nil {
+						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
+						continue
+					}
+					output, err := tCmd.Output()
+					if err != nil {
+						slog.Error("cannot send", "msg", err)
+					}
+					sendByCallback(bot, &update, string(output), nil)
+					continue
+				}
+
+				var data buttonData
+				err := json.Unmarshal([]byte(update.CallbackQuery.Data), &data)
+				if err != nil {
+					sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
+					continue
+				}
+				if len(data.Subcats) != 0 {
+					sendByCallback(bot, &update, "choose subcat", createKeyboardFroSubcat(data.Cat, data.Subcats))
 				} else {
-					tCmd = exec.Command("timew", "start", data.Cat)
-				}
-				if err != nil {
-					sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
-					continue
-				}
+					if data.Cat == "" {
+						slog.Error("cat is empty")
+					}
+					var tCmd *exec.Cmd
+					if data.Subcat != "" {
+						tCmd = exec.Command("timew", "start", data.Cat, data.Subcat)
+					} else {
+						tCmd = exec.Command("timew", "start", data.Cat)
+					}
+					if err != nil {
+						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
+						continue
+					}
 
-				slog.Info("Start command", "cmd", tCmd)
-				output, err := tCmd.Output()
-				if err != nil {
-					sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
-					continue
+					slog.Info("Start command", "cmd", tCmd)
+					output, err := tCmd.Output()
+					if err != nil {
+						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
+						continue
+					}
+					sendByCallback(bot, &update, string(output), closeKeyboard)
+					// TODO: set timer to check if we abandon task
 				}
-				sendByCallback(bot, &update, string(output), closeKeyboard)
-				// TODO: set timer to check if we abandon task
 			}
 		}
 	}
+}
+
+func initLog() {
+	th := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr { // omfg, slog has trully opaque interface (as most things in go)
+			if a.Key == slog.SourceKey {
+				s := a.Value.Any().(*slog.Source)
+				s.File = path.Base(s.File)
+			}
+			return a
+		},
+	})
+	slog.SetDefault(slog.New(th))
 }

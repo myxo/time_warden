@@ -4,6 +4,9 @@ build:
 build_linux:
 	GOOS=linux GOARCH=amd64 go build -o usr/bin/time_warden ./...
 
+run:
+	go run ./... -token-file=token -categories=etc/time_warden_category.yml
+
 deb:
 	rm -rf PKG_SOURCE
 	mkdir -p PKG_SOURCE
