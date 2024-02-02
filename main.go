@@ -9,8 +9,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
+	"text/scanner"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"gopkg.in/yaml.v3"
@@ -146,6 +149,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	idsWL := loadWhiteList()
 	// bot.Debug = true
 
 	slog.Info("here we go")
@@ -167,8 +171,12 @@ Loop:
 		case <-sigc:
 			break Loop
 		case update := <-updates:
+			if len(idsWL) != 0 && !slices.Contains(idsWL, update.FromChat().ID) {
+				slog.Warn("message from non white list chat", "id", update.FromChat().ID)
+				continue
+			}
 			if update.Message != nil {
-				slog.Info("Message", "username", update.Message.From.UserName, "text", update.Message.Text)
+				slog.Info("Message", "username", update.Message.From.UserName, "id", update.FromChat().ID, "text", update.Message.Text)
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
 
 				switch update.Message.Text {
@@ -216,7 +224,7 @@ Loop:
 				var data buttonData
 				err := json.Unmarshal([]byte(update.CallbackQuery.Data), &data)
 				if err != nil {
-					sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
+					sendByCallback(bot, &update, fmt.Sprintf("cannot unmarshal button data: %s", err.Error()), nil)
 					continue
 				}
 				if len(data.Subcats) != 0 {
@@ -262,4 +270,20 @@ func initLog() {
 		},
 	})
 	slog.SetDefault(slog.New(th))
+}
+
+func loadWhiteList() []int64 {
+	var idsWL []int64
+	idsWLRaw, err := os.ReadFile("/etc/time_warden_wl")
+	if err == nil {
+		var s scanner.Scanner
+		s.Init(strings.NewReader(string(idsWLRaw)))
+		for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
+			if id, err := strconv.Atoi(s.TokenText()); err == nil {
+				idsWL = append(idsWL, int64(id))
+			}
+		}
+	}
+	slog.Info("white list", "ids", idsWL)
+	return idsWL
 }
