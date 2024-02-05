@@ -9,67 +9,48 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"text/scanner"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"gopkg.in/yaml.v3"
 )
 
 type category struct {
-	Name   string
-	Subcat []string
-}
-
-type categories struct {
-	cats []category
-}
-
-// manual unmarshall to preserve list order
-func (c *categories) UnmarshalYAML(value *yaml.Node) error {
-	var lastCat *category
-	for _, content := range value.Content {
-		switch content.Kind {
-		case yaml.SequenceNode:
-			if content.Tag == "!!seq" {
-				for i := range content.Content {
-					lastCat.Subcat = append(lastCat.Subcat, content.Content[i].Value)
-				}
-			}
-		case yaml.ScalarNode:
-			if content.Tag == "!!str" {
-				c.cats = append(c.cats, category{Name: content.Value})
-				lastCat = &c.cats[len(c.cats)-1]
-			}
-		default:
-		}
-	}
-	return nil
+	Name       string        `yaml:"name"`
+	Subcat     []category    `yaml:"subcat"` // subcat always has this field as nil
+	RemindTime time.Duration `yaml:"time"`
 }
 
 type buttonData struct {
 	Cat     string
 	Subcat  string
-	Subcats []string
+	Subcats []string // TODO: remove this (can overflow button data limit)
 }
 
-func createKeyboard(cats categories) tgbotapi.InlineKeyboardMarkup {
+func createKeyboard(cats []category) tgbotapi.InlineKeyboardMarkup {
 	curRow := make([]tgbotapi.InlineKeyboardButton, 0, 3)
 	var keyboard [][]tgbotapi.InlineKeyboardButton
 
-	for i := range cats.cats {
+	for i := range cats {
 		if cap(curRow) == len(curRow) {
 			keyboard = append(keyboard, curRow)
 			curRow = make([]tgbotapi.InlineKeyboardButton, 0, 3)
 		}
+		subcatNames := make([]string, len(cats[i].Subcat))
+		for _, cat := range cats[i].Subcat {
+			subcatNames = append(subcatNames, cat.Name)
+		}
 		subCutJson, _ := json.Marshal(&buttonData{
-			Cat:     cats.cats[i].Name,
-			Subcats: cats.cats[i].Subcat,
+			Cat:     cats[i].Name,
+			Subcats: subcatNames,
 		})
-		curRow = append(curRow, tgbotapi.NewInlineKeyboardButtonData(cats.cats[i].Name, string(subCutJson)))
+		curRow = append(curRow, tgbotapi.NewInlineKeyboardButtonData(cats[i].Name, string(subCutJson)))
 	}
 	keyboard = append(keyboard, curRow)
 	return tgbotapi.InlineKeyboardMarkup{
@@ -120,7 +101,24 @@ func checkActiveTracker() bool {
 	return strings.HasPrefix(string(output), "Tracking")
 }
 
+func getTimerDuration(cats []category, catName string, subcatName string) time.Duration {
+	for i := range cats {
+		if cats[i].Name == catName {
+			if subcatName == "" {
+				return cats[i].RemindTime
+			}
+			for j := range cats[i].Subcat {
+				if cats[i].Subcat[j].Name == subcatName {
+					return cats[i].Subcat[j].RemindTime
+				}
+			}
+		}
+	}
+	return 0
+}
+
 func main() {
+	runtime.GOMAXPROCS(1)
 	initLog()
 	tokenFile := flag.String("token-file", "token", "telegram api token")
 	categoryFile := flag.String("categories", "category.yml", "file with list of categories")
@@ -142,8 +140,8 @@ func main() {
 		slog.Error("cannot open category file", "error", err)
 		os.Exit(1)
 	}
-	var cat categories
-	err = yaml.Unmarshal(configRaw, &cat)
+	var cats []category
+	err = yaml.Unmarshal(configRaw, &cats)
 	if err != nil {
 		slog.Error("cannot parse category file", "error", err)
 		os.Exit(1)
@@ -159,11 +157,13 @@ func main() {
 
 	updates := bot.GetUpdatesChan(u)
 
-	mainKeyboard := createKeyboard(cat)
+	mainKeyboard := createKeyboard(cats)
 	closeKeyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("stop", "stop")))
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	var chatId int64 // since we use bot only for 1 chat, we can just save it here // todo: save it, so restart don't break timer
+	var timer *time.Timer
 
 Loop:
 	for {
@@ -175,6 +175,7 @@ Loop:
 				slog.Warn("message from non white list chat", "id", update.FromChat().ID)
 				continue
 			}
+			chatId = update.FromChat().ID
 			if update.Message != nil {
 				slog.Info("Message", "username", update.Message.From.UserName, "id", update.FromChat().ID, "text", update.Message.Text)
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
@@ -213,6 +214,9 @@ Loop:
 						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
 						continue
 					}
+					if timer != nil {
+						timer.Stop()
+					}
 					output, err := tCmd.Output()
 					if err != nil {
 						slog.Error("cannot send", "msg", err)
@@ -243,15 +247,26 @@ Loop:
 						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
 						continue
 					}
+					dt := getTimerDuration(cats, data.Cat, data.Subcat)
+					if timer != nil {
+						timer.Stop()
+					}
 
-					slog.Info("Start command", "cmd", tCmd)
+					slog.Info("Start command", "cmd", tCmd, "timer", dt)
 					output, err := tCmd.Output()
 					if err != nil {
 						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
 						continue
 					}
 					sendByCallback(bot, &update, string(output), closeKeyboard)
-					// TODO: set timer to check if we abandon task
+
+					timer = time.AfterFunc(dt, func() {
+						msg := tgbotapi.NewMessage(chatId, "are you still doing it?")
+						if _, err := bot.Send(msg); err != nil {
+							slog.Error("cannot send", "msg", err)
+						}
+						timer.Reset(dt)
+					})
 				}
 			}
 		}

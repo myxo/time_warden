@@ -1,13 +1,26 @@
-work:
-work-side:
-art:
-  - photo
-  - guitar
-ssyp:
-side:
-alife:
-house_keeping:
-gym:
-media:
-  - film
-  - anime
+- name: work
+  time: 4h
+- name: work-side
+  time: 2h
+- name: art
+  subcat:
+    - name: photo
+      time: 2h
+    - name: guitar
+      time: 1h
+- name: ssyp
+  time: 2h
+- name: side
+  time: 2h
+- name: alife
+  time: 2h
+- name: house_keeping
+  time: 3h
+- name: gym
+  time: 2h
+- name: media
+  subcat:
+    - name: film
+      time: 3h
+    - name: anime
+      time: 3h
