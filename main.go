@@ -28,44 +28,41 @@ type category struct {
 }
 
 type buttonData struct {
-	Cat     string
-	Subcat  string
-	Subcats []string // TODO: remove this (can overflow button data limit)
+	Cat    string
+	Subcat string
 }
 
-func createKeyboard(cats []category) tgbotapi.InlineKeyboardMarkup {
-	curRow := make([]tgbotapi.InlineKeyboardButton, 0, 3)
-	var keyboard [][]tgbotapi.InlineKeyboardButton
+var closeKeyboard = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("stop", "stop")))
+
+func createKeyboard(cats []category) tgbotapi.ReplyKeyboardMarkup {
+	curRow := make([]tgbotapi.KeyboardButton, 0, 3)
+	var keyboard [][]tgbotapi.KeyboardButton
 
 	for i := range cats {
 		if cap(curRow) == len(curRow) {
 			keyboard = append(keyboard, curRow)
-			curRow = make([]tgbotapi.InlineKeyboardButton, 0, 3)
+			curRow = make([]tgbotapi.KeyboardButton, 0, 3)
 		}
 		subcatNames := make([]string, len(cats[i].Subcat))
 		for _, cat := range cats[i].Subcat {
 			subcatNames = append(subcatNames, cat.Name)
 		}
-		subCutJson, _ := json.Marshal(&buttonData{
-			Cat:     cats[i].Name,
-			Subcats: subcatNames,
-		})
-		curRow = append(curRow, tgbotapi.NewInlineKeyboardButtonData(cats[i].Name, string(subCutJson)))
+		curRow = append(curRow, tgbotapi.NewKeyboardButton(cats[i].Name))
 	}
 	keyboard = append(keyboard, curRow)
-	return tgbotapi.InlineKeyboardMarkup{
-		InlineKeyboard: keyboard,
+	return tgbotapi.ReplyKeyboardMarkup{
+		Keyboard: keyboard,
 	}
 }
 
-func createKeyboardFroSubcat(chosedCat string, cats []string) tgbotapi.InlineKeyboardMarkup {
+func createKeyboardFroSubcat(chosedCat string, cats []category) tgbotapi.InlineKeyboardMarkup {
 	var keyboard []tgbotapi.InlineKeyboardButton
 	for i := range cats {
 		subCutJson, _ := json.Marshal(&buttonData{
 			Cat:    chosedCat,
-			Subcat: cats[i],
+			Subcat: cats[i].Name,
 		})
-		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardButtonData(cats[i], string(subCutJson)))
+		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardButtonData(cats[i].Name, string(subCutJson)))
 	}
 	return tgbotapi.NewInlineKeyboardMarkup(keyboard)
 }
@@ -79,16 +76,6 @@ func deleteKeyboard(bot *tgbotapi.BotAPI, update *tgbotapi.Update) {
 	_, err := bot.Send(edit)
 	if err != nil {
 		slog.Error("edit responce", "err", err)
-	}
-}
-
-func sendByCallback(bot *tgbotapi.BotAPI, update *tgbotapi.Update, msg string, replyMarkup any) {
-	response := tgbotapi.NewMessage(update.FromChat().ID, msg)
-	if replyMarkup != nil {
-		response.ReplyMarkup = replyMarkup
-	}
-	if _, err := bot.Send(response); err != nil {
-		slog.Error("cannot send", "msg", err)
 	}
 }
 
@@ -115,6 +102,74 @@ func getTimerDuration(cats []category, catName string, subcatName string) time.D
 		}
 	}
 	return 0
+}
+
+type Warden struct {
+	bot    *tgbotapi.BotAPI
+	timer  *time.Timer
+	cats   []category
+	chatID int64
+}
+
+func (w *Warden) runTimew(cat string, subcat string) {
+
+	var tCmd *exec.Cmd
+	if subcat != "" {
+		tCmd = exec.Command("timew", "start", cat, subcat)
+	} else {
+		tCmd = exec.Command("timew", "start", cat)
+	}
+	dt := getTimerDuration(w.cats, cat, subcat)
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+
+	slog.Info("Start command", "cmd", tCmd, "timer", dt)
+	output, err := tCmd.Output()
+	if err != nil {
+		w.send(fmt.Sprintf("error: %s", err.Error()), nil)
+		return
+	}
+	w.send(string(output), closeKeyboard)
+
+	w.timer = time.AfterFunc(dt, func() {
+		msg := tgbotapi.NewMessage(w.chatID, "are you still doing it?")
+		if _, err := w.bot.Send(msg); err != nil {
+			slog.Error("cannot send", "msg", err)
+		}
+		w.timer.Reset(dt) // TODO: fix race
+	})
+}
+
+func (w *Warden) send(msg string, replyMarkup any) {
+	response := tgbotapi.NewMessage(w.chatID, msg)
+	if replyMarkup != nil {
+		response.ReplyMarkup = replyMarkup
+	}
+	if _, err := w.bot.Send(response); err != nil {
+		slog.Error("cannot send", "msg", err)
+	}
+}
+
+func (w *Warden) CategoryChoosen(cat string) {
+	for i := range w.cats {
+		if w.cats[i].Name == cat {
+			if len(w.cats[i].Subcat) == 0 {
+				w.runTimew(cat, "")
+			} else {
+				msg := tgbotapi.NewMessage(w.chatID, "choose subcat")
+				msg.ReplyMarkup = createKeyboardFroSubcat(cat, w.cats[i].Subcat)
+				if _, err := w.bot.Send(msg); err != nil {
+					slog.Error("cannot send", "msg", err)
+				}
+			}
+			return
+		}
+	}
+	msg := tgbotapi.NewMessage(w.chatID, "unknown category")
+	if _, err := w.bot.Send(msg); err != nil {
+		slog.Error("cannot send", "msg", err)
+	}
 }
 
 func main() {
@@ -158,13 +213,14 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 
 	mainKeyboard := createKeyboard(cats)
-	closeKeyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("stop", "stop")))
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	var chatId int64 // since we use bot only for 1 chat, we can just save it here // todo: save it, so restart don't break timer
-	var timer *time.Timer
 
+	w := Warden{
+		bot:  bot,
+		cats: cats,
+	}
 Loop:
 	for {
 		select {
@@ -175,7 +231,7 @@ Loop:
 				slog.Warn("message from non white list chat", "id", update.FromChat().ID)
 				continue
 			}
-			chatId = update.FromChat().ID
+			w.chatID = update.FromChat().ID // TODO: just get from whitelist?
 			if update.Message != nil {
 				slog.Info("Message", "username", update.Message.From.UserName, "id", update.FromChat().ID, "text", update.Message.Text)
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
@@ -183,19 +239,19 @@ Loop:
 				switch update.Message.Text {
 				case "/open":
 					msg.ReplyMarkup = mainKeyboard
+				case "/start":
+					msg.ReplyMarkup = mainKeyboard
 				case "/stop":
-					tCmd := exec.Command("timew", "stop")
+					output, err := exec.Command("timew", "stop").Output()
 					if err != nil {
-						msg.Text = fmt.Sprintf("error: %s", err.Error())
-					} else {
-						output, err := tCmd.Output()
-						if err != nil {
-							slog.Error("cannot run timew", "msg", err)
-						}
-						msg.Text = string(output)
+						slog.Error("cannot run timew", "msg", err)
 					}
+					msg.Text = string(output)
 				case "/status":
 					// TODO
+				default:
+					w.CategoryChoosen(update.Message.Text)
+					continue
 				}
 				if _, err := bot.Send(msg); err != nil {
 					slog.Error("cannot send", "msg", err)
@@ -211,63 +267,38 @@ Loop:
 				if update.CallbackQuery.Data == "stop" {
 					tCmd := exec.Command("timew", "stop")
 					if err != nil {
-						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
+						w.send(fmt.Sprintf("error: %s", err.Error()), nil)
 						continue
 					}
-					if timer != nil {
-						timer.Stop()
+					if w.timer != nil {
+						w.timer.Stop()
 					}
 					output, err := tCmd.Output()
 					if err != nil {
 						slog.Error("cannot send", "msg", err)
 					}
-					sendByCallback(bot, &update, string(output), nil)
+					w.send(string(output), nil)
 					continue
 				}
 
+				// User choosed cubcategory
 				var data buttonData
 				err := json.Unmarshal([]byte(update.CallbackQuery.Data), &data)
 				if err != nil {
-					sendByCallback(bot, &update, fmt.Sprintf("cannot unmarshal button data: %s", err.Error()), nil)
+					w.send(fmt.Sprintf("cannot unmarshal button data: %s", err.Error()), nil)
 					continue
 				}
-				if len(data.Subcats) != 0 {
-					sendByCallback(bot, &update, "choose subcat", createKeyboardFroSubcat(data.Cat, data.Subcats))
-				} else {
-					if data.Cat == "" {
-						slog.Error("cat is empty")
-					}
-					var tCmd *exec.Cmd
-					if data.Subcat != "" {
-						tCmd = exec.Command("timew", "start", data.Cat, data.Subcat)
-					} else {
-						tCmd = exec.Command("timew", "start", data.Cat)
-					}
-					if err != nil {
-						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
-						continue
-					}
-					dt := getTimerDuration(cats, data.Cat, data.Subcat)
-					if timer != nil {
-						timer.Stop()
-					}
-
-					slog.Info("Start command", "cmd", tCmd, "timer", dt)
-					output, err := tCmd.Output()
-					if err != nil {
-						sendByCallback(bot, &update, fmt.Sprintf("error: %s", err.Error()), nil)
-						continue
-					}
-					sendByCallback(bot, &update, string(output), closeKeyboard)
-
-					timer = time.AfterFunc(dt, func() {
-						msg := tgbotapi.NewMessage(chatId, "are you still doing it?")
-						if _, err := bot.Send(msg); err != nil {
-							slog.Error("cannot send", "msg", err)
-						}
-						timer.Reset(dt)
-					})
+				if data.Cat == "" {
+					slog.Error("cat is empty")
+					w.send(fmt.Sprintf("internal error: category data is empty"), nil)
+					continue
 				}
+				if data.Subcat == "" {
+					slog.Error("subcat is empty")
+					w.send(fmt.Sprintf("internal error: subcategory data is empty"), nil)
+					continue
+				}
+				w.runTimew(data.Cat, data.Subcat)
 			}
 		}
 	}

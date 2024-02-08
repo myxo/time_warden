@@ -9,3 +9,6 @@ This <s>app</s> script is not intended to be read or (god forbid) run by anyone 
 - [ ] change version in control file (in github action)
 - [ ] open keyboard all time?
 - [ ] fix start service on boot
+- [ ] update package without changing .service file (if no real changes)
+- [ ] timer should survive restart
+- [ ] refactor

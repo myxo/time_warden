@@ -1,5 +1,5 @@
 Package: time-warden
-Version: 0.0.6
+Version: 0.0.7
 Depends: timewarrior
 Section: misc
 Priority: optional
