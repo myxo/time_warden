@@ -18,6 +18,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"golang.org/x/exp/maps"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,13 +36,13 @@ type buttonData struct {
 var closeKeyboard = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("stop", "stop")))
 
 func createKeyboard(cats []category) tgbotapi.ReplyKeyboardMarkup {
-	curRow := make([]tgbotapi.KeyboardButton, 0, 3)
+	curRow := make([]tgbotapi.KeyboardButton, 0, 4)
 	var keyboard [][]tgbotapi.KeyboardButton
 
 	for i := range cats {
 		if cap(curRow) == len(curRow) {
 			keyboard = append(keyboard, curRow)
-			curRow = make([]tgbotapi.KeyboardButton, 0, 3)
+			curRow = make([]tgbotapi.KeyboardButton, 0, 4)
 		}
 		subcatNames := make([]string, len(cats[i].Subcat))
 		for _, cat := range cats[i].Subcat {
@@ -217,6 +218,8 @@ func main() {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 
+	weekReportTimer := time.NewTimer(getDurationToReport())
+
 	w := Warden{
 		bot:  bot,
 		cats: cats,
@@ -226,6 +229,14 @@ Loop:
 		select {
 		case <-sigc:
 			break Loop
+		case <-weekReportTimer.C:
+			report := generateWeeklyReport()
+			msg := tgbotapi.NewMessage(w.chatID, report)
+			if _, err := bot.Send(msg); err != nil {
+				slog.Error("cannot send", "msg", err)
+			}
+			weekReportTimer = time.NewTimer(getDurationToReport())
+
 		case update := <-updates:
 			if len(idsWL) != 0 && !slices.Contains(idsWL, update.FromChat().ID) {
 				slog.Warn("message from non white list chat", "id", update.FromChat().ID)
@@ -247,8 +258,10 @@ Loop:
 						slog.Error("cannot run timew", "msg", err)
 					}
 					msg.Text = string(output)
-				case "/status":
-					// TODO
+				case "/report":
+					report := generateWeeklyReport()
+					msg.Text = report
+
 				default:
 					w.CategoryChoosen(update.Message.Text)
 					continue
@@ -332,4 +345,59 @@ func loadWhiteList() []int64 {
 	}
 	slog.Info("white list", "ids", idsWL)
 	return idsWL
+}
+
+func getDurationToReport() time.Duration {
+	now := time.Now().Add(time.Second)
+	reportDate := time.Date(now.Year(), now.Month(), now.Day(), 22, 30, 0, 0, time.Local)
+	dur := reportDate.Sub(now)
+	if dur <= 0 {
+		dur += time.Hour * 24 * 7
+	}
+	return dur
+}
+
+func generateWeeklyReport() string {
+	output, err := exec.Command("timew", "export", ":week").Output()
+	if err != nil {
+		slog.Error("cannot run timew", "msg", err)
+		return "cannot generate summary: " + err.Error()
+	}
+	type event struct {
+		Start string
+		End   string
+		Tags  []string
+	}
+	var events []event
+	err = json.Unmarshal(output, &events)
+	if err != nil {
+		return "cannot unmarshall: " + err.Error()
+	}
+
+	reportDur := make(map[string]time.Duration)
+	for _, ev := range events {
+		const layout = "20060102T150405Z"
+		start, err := time.Parse(layout, ev.Start)
+		if err != nil {
+			return "cannot parse time: " + err.Error()
+		}
+		end, err := time.Parse(layout, ev.End)
+		if err != nil {
+			return "cannot parse time: " + err.Error()
+		}
+		dur := end.Sub(start)
+		for _, tag := range ev.Tags {
+			acc := reportDur[tag]
+			reportDur[tag] = dur + acc
+		}
+	}
+
+	keys := maps.Keys(reportDur)
+	slices.Sort(keys)
+	report := []string{}
+	for _, key := range keys {
+		report = append(report, fmt.Sprintf("%s: %s", key, reportDur[key]))
+	}
+
+	return strings.Join(report, "\n")
 }

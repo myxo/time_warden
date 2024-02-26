@@ -12,9 +12,9 @@
   time: 2h
 - name: side
   time: 2h
-- name: alife
+- name: alive
   time: 2h
-- name: house_keeping
+- name: house
   time: 3h
 - name: gym
   time: 2h
