@@ -219,6 +219,7 @@ func main() {
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 
 	weekReportTimer := time.NewTimer(getDurationToReport())
+	slog.Info("set report time", "t", time.Now().Add(getDurationToReport()))
 
 	w := Warden{
 		bot:  bot,
@@ -348,14 +349,30 @@ func loadWhiteList() []int64 {
 }
 
 func getDurationToReport() time.Duration {
-	now := time.Now().Add(time.Second)
-	reportDate := time.Date(now.Year(), now.Month(), now.Day(), 22, 30, 0, 0, time.Local)
-	dur := reportDate.Sub(now)
-	if dur <= 0 {
-		dur += time.Hour * 24 * 7
-	}
-	return dur
+	now := time.Now()
+	referenceTime := now.Add(time.Hour + time.Minute * 31) // so we hit next week at time of report
+	year, week := referenceTime.ISOWeek()
+	weekStart := weekStart(year, week)
+	weekEnd := weekStart.AddDate(0, 0, 6).Add(time.Hour * 22 + time.Minute * 30) // to sunday 22:30
+	slog.Info("week end", "t", weekEnd)
+	return weekEnd.Sub(now)
 }
+
+func weekStart(year, week int) time.Time {
+	t := time.Date(year, 7, 1, 0, 0, 0, 0, time.Local)
+
+	// Roll back to Monday:
+	if wd := t.Weekday(); wd == time.Sunday {
+		t = t.AddDate(0, 0, -6)
+	} else {
+		t = t.AddDate(0, 0, -int(wd)+1)
+	}
+
+	_, w := t.ISOWeek()
+	t = t.AddDate(0, 0, (week-w)*7)
+	return t
+}
+
 
 func generateWeeklyReport() string {
 	output, err := exec.Command("timew", "export", ":week").Output()
@@ -376,6 +393,9 @@ func generateWeeklyReport() string {
 
 	reportDur := make(map[string]time.Duration)
 	for _, ev := range events {
+		if ev.Start == "" || ev.End == "" {
+			continue
+		}
 		const layout = "20060102T150405Z"
 		start, err := time.Parse(layout, ev.Start)
 		if err != nil {
@@ -394,9 +414,9 @@ func generateWeeklyReport() string {
 
 	keys := maps.Keys(reportDur)
 	slices.Sort(keys)
-	report := []string{}
+	report := []string{"Week report"}
 	for _, key := range keys {
-		report = append(report, fmt.Sprintf("%s: %s", key, reportDur[key]))
+		report = append(report, fmt.Sprintf("%s: %s", key, reportDur[key].Round(time.Minute)))
 	}
 
 	return strings.Join(report, "\n")

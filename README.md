@@ -5,7 +5,6 @@ This <s>app</s> script is not intended to be read or (god forbid) run by anyone 
 
 # TODO
 - [ ] research why binary is so bloated
-- [ ] add good summary command
 - [ ] change version in control file (in github action)
 - [ ] fix start service on boot
 - [ ] update package without changing .service file (if no real changes)
