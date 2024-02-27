@@ -219,7 +219,6 @@ func main() {
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 
 	weekReportTimer := time.NewTimer(getDurationToReport())
-	slog.Info("set report time", "t", time.Now().Add(getDurationToReport()))
 
 	w := Warden{
 		bot:  bot,
@@ -354,7 +353,6 @@ func getDurationToReport() time.Duration {
 	year, week := referenceTime.ISOWeek()
 	weekStart := weekStart(year, week)
 	weekEnd := weekStart.AddDate(0, 0, 6).Add(time.Hour * 22 + time.Minute * 30) // to sunday 22:30
-	slog.Info("week end", "t", weekEnd)
 	return weekEnd.Sub(now)
 }
 
