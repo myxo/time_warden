@@ -31,18 +31,28 @@ jobs:
         cd REPO
         GOOS=linux GOARCH=arm go build -v -o arm64/usr/bin/time_warden ./...
 
+    - name: Set Versions
+      uses: actions/github-script@v4
+      id: set_version
+      with:
+        script: |
+          const tag = context.ref.substring(10)
+          const no_v = tag.replace('v', '')
+          core.setOutput('tag', tag)
+          core.setOutput('no-v', no_v)
+
     - name: Build package AMD
       run: |
         mkdir -p PKG_SOURCE_AMD
         cp -Rf REPO/amd64/usr REPO/etc REPO/DEBIAN PKG_SOURCE_AMD
-        sed -i 's/_PKG_VERSION_/${{ github.ref_name }}/g' PKG_SOURCE_AMD/DEBIAN/control
+        sed -i 's/_PKG_VERSION_/${{steps.set_version.outputs.no-v}}/g' PKG_SOURCE_AMD/DEBIAN/control
         dpkg-deb --build PKG_SOURCE_AMD time_warden_amd_${{  github.ref_name }}.deb
 
     - name: Build package ARM
       run: |
         mkdir -p PKG_SOURCE_ARM
         cp -Rf REPO/arm64/usr REPO/etc REPO/DEBIAN PKG_SOURCE_ARM
-        sed -i 's/_PKG_VERSION_/${{ github.ref_name }}/g' PKG_SOURCE_ARM/DEBIAN/control
+        sed -i 's/_PKG_VERSION_/${{steps.set_version.outputs.no-v}}/g' PKG_SOURCE_ARM/DEBIAN/control
         dpkg-deb --build PKG_SOURCE_ARM time_warden_arm_${{  github.ref_name }}.deb
 
     - name: Create Release
