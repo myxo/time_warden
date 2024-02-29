@@ -185,8 +185,15 @@ func main() {
 		os.Exit(1)
 	}
 	token := strings.TrimSpace(string(tokenRaw))
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
+	var bot *tgbotapi.BotAPI
+	for count := 0; count < 5; count++ {
+		bot, err = tgbotapi.NewBotAPI(token)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second) // I can't make this run after network-online.target due to systemd bug or skill issue =|
+	}
+	if bot == nil {
 		slog.Error("cannot connect to telegram api", "error", err)
 		os.Exit(1)
 	}
@@ -349,10 +356,10 @@ func loadWhiteList() []int64 {
 
 func getDurationToReport() time.Duration {
 	now := time.Now()
-	referenceTime := now.Add(time.Hour + time.Minute * 31) // so we hit next week at time of report
+	referenceTime := now.Add(time.Hour + time.Minute*31) // so we hit next week at time of report
 	year, week := referenceTime.ISOWeek()
 	weekStart := weekStart(year, week)
-	weekEnd := weekStart.AddDate(0, 0, 6).Add(time.Hour * 22 + time.Minute * 30) // to sunday 22:30
+	weekEnd := weekStart.AddDate(0, 0, 6).Add(time.Hour*22 + time.Minute*30) // to sunday 22:30
 	return weekEnd.Sub(now)
 }
 
@@ -370,7 +377,6 @@ func weekStart(year, week int) time.Time {
 	t = t.AddDate(0, 0, (week-w)*7)
 	return t
 }
-
 
 func generateWeeklyReport() string {
 	output, err := exec.Command("timew", "export", ":week").Output()
