@@ -35,12 +35,14 @@ jobs:
       run: |
         mkdir -p PKG_SOURCE_AMD
         cp -Rf REPO/amd64/usr REPO/etc REPO/DEBIAN PKG_SOURCE_AMD
+        sed -i 's/_PKG_VERSION_/${{ github.ref_name }}/g' PKG_SOURCE_AMD/DEBIAN/control
         dpkg-deb --build PKG_SOURCE_AMD time_warden_amd_${{  github.ref_name }}.deb
 
     - name: Build package ARM
       run: |
         mkdir -p PKG_SOURCE_ARM
         cp -Rf REPO/arm64/usr REPO/etc REPO/DEBIAN PKG_SOURCE_ARM
+        sed -i 's/_PKG_VERSION_/${{ github.ref_name }}/g' PKG_SOURCE_ARM/DEBIAN/control
         dpkg-deb --build PKG_SOURCE_ARM time_warden_arm_${{  github.ref_name }}.deb
 
     - name: Create Release
