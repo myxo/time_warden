@@ -486,7 +486,7 @@ func generateWeeklyReport(exportArg string) string {
 	slices.Sort(keys)
 	report := []string{"Week report"}
 	for _, key := range keys {
-		report = append(report, fmt.Sprintf("%s: %s", key, reportDur[key].Round(time.Minute)))
+		report = append(report, fmt.Sprintf("%s ---- %s", key, reportDur[key].Round(time.Minute)))
 	}
 
 	return strings.Join(report, "\n")
