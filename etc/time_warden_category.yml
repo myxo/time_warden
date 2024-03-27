@@ -1,6 +1,6 @@
-- name: work
+- name: work vk
   time: 4h
-- name: work-side
+- name: work vk-ext
   time: 2h
 - name: art
   subcat:
@@ -10,17 +10,13 @@
       time: 1h
 - name: ssyp
   time: 2h
-- name: side
+- name: work side
   time: 2h
-- name: alive
+- name: alife
   time: 2h
 - name: house
   time: 3h
 - name: gym
   time: 2h
-- name: media
-  subcat:
-    - name: film
-      time: 3h
-    - name: anime
-      time: 3h
+- name: anime
+  time: 1h

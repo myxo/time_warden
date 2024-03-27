@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"text/scanner"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -80,13 +79,67 @@ func deleteKeyboard(bot *tgbotapi.BotAPI, update *tgbotapi.Update) {
 	}
 }
 
-func checkActiveTracker() bool {
+func checkActiveTracker(cats []category) (time.Duration, time.Duration, bool) {
 	cmd := exec.Command("timew")
 	output, err := cmd.Output()
 	if err != nil {
 		slog.Error("cannot call timew", "msg", err)
 	}
-	return strings.HasPrefix(string(output), "Tracking")
+	txt := string(output)
+	if !strings.HasPrefix(string(output), "Tracking") {
+		return 0, 0, false
+	}
+	lines := strings.Split(txt, "\n")
+	if len(lines) < 3 {
+		slog.Error("wrong timew format, cannot restore timer", "txt", txt)
+		return 0, 0, false
+	}
+	curCats := strings.Fields(lines[0])[1:]
+	slices.Sort(curCats)
+	timerDur := time.Duration(0)
+	// why is so complicated >_<
+Outer:
+	for i := range cats {
+		checkCats := strings.Fields(cats[i].Name)
+		slices.Sort(checkCats)
+		if slices.Equal(curCats, checkCats) {
+			timerDur = cats[i].RemindTime
+			break Outer
+		}
+		for j := range cats[i].Subcat {
+			checkCats := strings.Fields(cats[i].Name)
+			checkCats = append(checkCats, cats[i].Subcat[j].Name)
+			slices.Sort(checkCats)
+			if slices.Equal(curCats, checkCats) {
+				timerDur = cats[i].Subcat[j].RemindTime
+				break Outer
+			}
+		}
+	}
+	totalLine := strings.Fields(lines[3])
+	if len(totalLine) < 2 {
+		slog.Error("wrong total line format", "line", lines[3])
+		return 0, 0, false
+	}
+	timeSlice := strings.Split(totalLine[1], ":")
+	if len(timeSlice) < 3 {
+		slog.Error("wrong total line format", "line", lines[3])
+		return 0, 0, false
+	}
+	toDur := func(s string, d time.Duration) time.Duration {
+		t, err := strconv.Atoi(s)
+		if err != nil {
+			slog.Error("wrong time format")
+			return 0
+		}
+		return d * time.Duration(t)
+	}
+	total := toDur(timeSlice[0], time.Hour) + toDur(timeSlice[1], time.Minute) + toDur(timeSlice[2], time.Second)
+	left := timerDur - total
+	if left < 0 {
+		left = 0
+	}
+	return left, timerDur, true
 }
 
 func getTimerDuration(cats []category, catName string, subcatName string) time.Duration {
@@ -113,13 +166,12 @@ type Warden struct {
 }
 
 func (w *Warden) runTimew(cat string, subcat string) {
-
-	var tCmd *exec.Cmd
+	args := []string{"start"}
+	args = append(args, strings.Split(cat, " ")...)
 	if subcat != "" {
-		tCmd = exec.Command("timew", "start", cat, subcat)
-	} else {
-		tCmd = exec.Command("timew", "start", cat)
+		args = append(args, subcat)
 	}
+	tCmd := exec.Command("timew", args...)
 	dt := getTimerDuration(w.cats, cat, subcat)
 	if w.timer != nil {
 		w.timer.Stop()
@@ -132,13 +184,16 @@ func (w *Warden) runTimew(cat string, subcat string) {
 		return
 	}
 	w.send(string(output), closeKeyboard)
+	w.setRemindTimer(dt, dt)
+}
 
-	w.timer = time.AfterFunc(dt, func() {
+func (w *Warden) setRemindTimer(fireAfter time.Duration, scheduleDuration time.Duration) {
+	w.timer = time.AfterFunc(fireAfter, func() {
 		msg := tgbotapi.NewMessage(w.chatID, "are you still doing it?")
 		if _, err := w.bot.Send(msg); err != nil {
 			slog.Error("cannot send", "msg", err)
 		}
-		w.timer.Reset(dt) // TODO: fix race
+		w.timer.Reset(scheduleDuration) // TODO: fix race
 	})
 }
 
@@ -179,6 +234,7 @@ func main() {
 	tokenFile := flag.String("token-file", "token", "telegram api token")
 	categoryFile := flag.String("categories", "category.yml", "file with list of categories")
 	flag.Parse()
+
 	tokenRaw, err := os.ReadFile(*tokenFile)
 	if err != nil {
 		slog.Error("cannot read token file", "error", err)
@@ -191,7 +247,9 @@ func main() {
 		if err == nil {
 			break
 		}
-		time.Sleep(time.Second) // I can't make this run after network-online.target due to systemd bug or skill issue =|
+		// I can't make this run after network-online.target due to systemd bug or skill issue =|
+		// So just retry for a while
+		time.Sleep(time.Second)
 	}
 	if bot == nil {
 		slog.Error("cannot connect to telegram api", "error", err)
@@ -210,26 +268,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	idsWL := loadWhiteList()
 	// bot.Debug = true
 
+	idWL := loadWhiteList()
 	slog.Info("here we go")
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-
 	updates := bot.GetUpdatesChan(u)
 
 	mainKeyboard := createKeyboard(cats)
-
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 
 	weekReportTimer := time.NewTimer(getDurationToReport())
 
 	w := Warden{
-		bot:  bot,
-		cats: cats,
+		bot:    bot,
+		cats:   cats,
+		chatID: idWL,
+	}
+	if durToNotify, origDur, ok := checkActiveTracker(cats); ok {
+		slog.Info("Found active tracker, set remind timer", "dt", durToNotify)
+		w.setRemindTimer(durToNotify, origDur)
 	}
 Loop:
 	for {
@@ -237,7 +298,7 @@ Loop:
 		case <-sigc:
 			break Loop
 		case <-weekReportTimer.C:
-			report := generateWeeklyReport()
+			report := generateWeeklyReport(":week")
 			msg := tgbotapi.NewMessage(w.chatID, report)
 			if _, err := bot.Send(msg); err != nil {
 				slog.Error("cannot send", "msg", err)
@@ -245,7 +306,7 @@ Loop:
 			weekReportTimer = time.NewTimer(getDurationToReport())
 
 		case update := <-updates:
-			if len(idsWL) != 0 && !slices.Contains(idsWL, update.FromChat().ID) {
+			if idWL != 0 && idWL != update.FromChat().ID {
 				slog.Warn("message from non white list chat", "id", update.FromChat().ID)
 				continue
 			}
@@ -253,20 +314,26 @@ Loop:
 			if update.Message != nil {
 				slog.Info("Message", "username", update.Message.From.UserName, "id", update.FromChat().ID, "text", update.Message.Text)
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+				txt := update.Message.Text
 
-				switch update.Message.Text {
-				case "/open":
+				switch {
+				case txt == "/open":
 					msg.ReplyMarkup = mainKeyboard
-				case "/start":
+				case txt == "/start":
 					msg.ReplyMarkup = mainKeyboard
-				case "/stop":
+				case txt == "/stop":
 					output, err := exec.Command("timew", "stop").Output()
 					if err != nil {
 						slog.Error("cannot run timew", "msg", err)
 					}
 					msg.Text = string(output)
-				case "/report":
-					report := generateWeeklyReport()
+				case strings.HasPrefix(txt, "/report"):
+					sp := strings.Split(txt, " ")
+					arg := ":week"
+					if len(sp) > 1 {
+						arg = sp[1]
+					}
+					report := generateWeeklyReport(arg)
 					msg.Text = report
 
 				default:
@@ -338,20 +405,19 @@ func initLog() {
 	slog.SetDefault(slog.New(th))
 }
 
-func loadWhiteList() []int64 {
-	var idsWL []int64
-	idsWLRaw, err := os.ReadFile("/etc/time_warden_wl")
-	if err == nil {
-		var s scanner.Scanner
-		s.Init(strings.NewReader(string(idsWLRaw)))
-		for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
-			if id, err := strconv.Atoi(s.TokenText()); err == nil {
-				idsWL = append(idsWL, int64(id))
-			}
-		}
+func loadWhiteList() int64 {
+	idRaw, err := os.ReadFile("/etc/time_warden_wl")
+	if err != nil {
+		return 0
 	}
-	slog.Info("white list", "ids", idsWL)
-	return idsWL
+	data := strings.TrimSpace(string(idRaw))
+	id, err := strconv.Atoi(data)
+	if err != nil {
+		slog.Error("Cannot parse white list file", "error", err)
+		return 0
+	}
+	slog.Info("white list", "id", id)
+	return int64(id)
 }
 
 func getDurationToReport() time.Duration {
@@ -378,8 +444,8 @@ func weekStart(year, week int) time.Time {
 	return t
 }
 
-func generateWeeklyReport() string {
-	output, err := exec.Command("timew", "export", ":week").Output()
+func generateWeeklyReport(exportArg string) string {
+	output, err := exec.Command("timew", "export", exportArg).Output()
 	if err != nil {
 		slog.Error("cannot run timew", "msg", err)
 		return "cannot generate summary: " + err.Error()
