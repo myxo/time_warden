@@ -116,6 +116,10 @@ Outer:
 			}
 		}
 	}
+	if timerDur == 0 {
+		slog.Warn("timew track unknown category, ignore", "cats", curCats)
+		return 0, 0, false
+	}
 	totalLine := strings.Fields(lines[3])
 	if len(totalLine) < 2 {
 		slog.Error("wrong total line format", "line", lines[3])
