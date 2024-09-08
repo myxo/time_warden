@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"golang.org/x/exp/maps"
 	"gopkg.in/yaml.v3"
 )
 
@@ -486,10 +486,8 @@ func generateWeeklyReport(exportArg string) string {
 		}
 	}
 
-	keys := maps.Keys(reportDur)
-	slices.Sort(keys)
 	report := []string{"Week report"}
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(reportDur)) {
 		report = append(report, fmt.Sprintf("%s ---- %s", key, reportDur[key].Round(time.Minute)))
 	}
 
