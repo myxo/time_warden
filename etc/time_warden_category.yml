@@ -8,15 +8,17 @@
       time: 2h
     - name: guitar
       time: 1h
-- name: ssyp
-  time: 2h
 - name: work side
   time: 2h
+- name: read
+  time: 1h
 - name: alife
   time: 2h
 - name: house
   time: 3h
 - name: gym
-  time: 2h
+  time: 1h30m
+- name: road
+  time: 1h
 - name: anime
   time: 1h
