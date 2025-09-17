@@ -1,6 +1,6 @@
-- name: work vk
+- name: work infra
   time: 4h
-- name: work vk-ext
+- name: work infra-ext
   time: 2h
 - name: art
   subcat:
