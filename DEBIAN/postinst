@@ -1,0 +1,29 @@
+#!/bin/sh
+
+set -e
+
+cleanup_legacy_unit() {
+	if [ ! -f "$1" ]; then
+		return 0
+	fi
+
+	# Remove the old unit only if it is still identical to the version that was shipped previously.
+	old_checksum="62c08431559c3ce16dfa0018932a804e463f3bbf3fb0800dfe0d2581848d3b0c"
+	current_checksum="$(sha256sum "$1" 2>/dev/null | awk '{print $1}')"
+
+	if [ "$current_checksum" = "$old_checksum" ]; then
+		rm -f "$1"
+	fi
+}
+
+case "$1" in
+	configure)
+		cleanup_legacy_unit "/etc/systemd/system/time-warden@.service"
+
+		if command -v systemctl >/dev/null 2>&1; then
+			systemctl daemon-reload >/dev/null 2>&1 || true
+		fi
+		;;
+esac
+
+exit 0

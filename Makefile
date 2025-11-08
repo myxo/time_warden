@@ -10,5 +10,5 @@ run:
 deb:
 	rm -rf PKG_SOURCE
 	mkdir -p PKG_SOURCE
-	cp -Rf ./usr ./etc ./DEBIAN PKG_SOURCE
+	cp -Rf ./usr ./lib ./etc ./DEBIAN PKG_SOURCE
 	dpkg-deb --build PKG_SOURCE time_warden.deb
