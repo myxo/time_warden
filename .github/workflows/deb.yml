@@ -32,14 +32,14 @@ jobs:
         GOOS=linux GOARCH=arm go build -v -o arm64/usr/bin/time_warden ./...
 
     - name: Set Versions
-      uses: actions/github-script@v4
       id: set_version
-      with:
-        script: |
-          const tag = context.ref.substring(10)
-          const no_v = tag.replace('v', '')
-          core.setOutput('tag', tag)
-          core.setOutput('no-v', no_v)
+      run: |
+        tag="${GITHUB_REF#refs/tags/}"
+        no_v="${tag#v}"
+        {
+          echo "tag=$tag"
+          echo "no-v=$no_v"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Build package AMD
       run: |
