@@ -1,12 +1,14 @@
 - name: work infra
   time: 4h
-- name: work infra-ext
+- name: work research
   time: 2h
 - name: art
   subcat:
     - name: photo
       time: 2h
     - name: guitar
+      time: 1h
+    - name: draw
       time: 1h
 - name: work side
   time: 2h
@@ -17,8 +19,8 @@
 - name: house
   time: 3h
 - name: gym
-  time: 1h30m
+  time: 1h20m
 - name: road
-  time: 1h
+  time: 45m
 - name: anime
   time: 1h
