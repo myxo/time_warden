@@ -1,7 +1,7 @@
 - name: work infra
   time: 4h
 - name: work research
-  time: 2h
+  time: 1h
 - name: art
   subcat:
     - name: photo
@@ -14,8 +14,8 @@
   time: 2h
 - name: read
   time: 1h
-- name: alife
-  time: 2h
+- name: blog
+  time: 1h
 - name: house
   time: 3h
 - name: gym
